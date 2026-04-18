@@ -2,65 +2,149 @@ package main
 
 import (
 	"crypto/tls"
-	"log/slog"
+	"fmt"
 	"net"
-	"strconv"
-	"strings"
 	"time"
 )
 
-func ScanTLS(host Host, out chan<- string, geo *Geo) {
-	if host.IP == nil {
-		ip, err := LookupIP(host.Origin)
-		if err != nil {
-			slog.Debug("Failed to get IP from the origin", "origin", host.Origin, "err", err)
-			return
-		}
-		host.IP = ip
+// ScanResult holds the result of a TLS scan for a single host.
+type ScanResult struct {
+	IP          string
+	Port        string
+	ServerName  string
+	HasReality  bool
+	CertSubject string
+	Latency     time.Duration
+	Error       error
+}
+
+// Scanner performs TLS/Reality detection scans.
+type Scanner struct {
+	Timeout    time.Duration
+	Concurrent int
+}
+
+// NewScanner creates a Scanner with the given timeout and concurrency.
+func NewScanner(timeout time.Duration, concurrent int) *Scanner {
+	return &Scanner{
+		Timeout:    timeout,
+		Concurrent: concurrent,
 	}
-	hostPort := net.JoinHostPort(host.IP.String(), strconv.Itoa(port))
-	conn, err := net.DialTimeout("tcp", hostPort, time.Duration(timeout)*time.Second)
+}
+
+// Scan attempts a TLS handshake to the given address and returns a ScanResult.
+func (s *Scanner) Scan(ip, port, serverName string) ScanResult {
+	result := ScanResult{
+		IP:   ip,
+		Port: port,
+	}
+
+	addr := net.JoinHostPort(ip, port)
+	start := time.Now()
+
+	conn, err := net.DialTimeout("tcp", addr, s.Timeout)
 	if err != nil {
-		slog.Debug("Cannot dial", "target", hostPort)
-		return
+		result.Error = fmt.Errorf("tcp dial: %w", err)
+		return result
 	}
 	defer conn.Close()
-	err = conn.SetDeadline(time.Now().Add(time.Duration(timeout) * time.Second))
-	if err != nil {
-		slog.Error("Error setting deadline", "err", err)
-		return
-	}
+
+	_ = conn.SetDeadline(time.Now().Add(s.Timeout))
+
 	tlsCfg := &tls.Config{
-		InsecureSkipVerify: true,
-		NextProtos:         []string{"h2", "http/1.1"},
-		CurvePreferences:   []tls.CurveID{tls.X25519},
+		ServerName:         serverName,
+		InsecureSkipVerify: true, //nolint:gosec // intentional for scanning
+		MinVersion:         tls.VersionTLS13,
 	}
-	if host.Type == HostTypeDomain {
-		tlsCfg.ServerName = host.Origin
+
+	tlsConn := tls.Client(conn, tlsCfg)
+	if err := tlsConn.Handshake(); err != nil {
+		// A failed TLS 1.3 handshake may still indicate a Reality endpoint.
+		result.HasReality = isRealityFingerprint(err)
+		result.Error = fmt.Errorf("tls handshake: %w", err)
+		result.Latency = time.Since(start)
+		return result
 	}
-	c := tls.Client(conn, tlsCfg)
-	err = c.Handshake()
-	if err != nil {
-		slog.Debug("TLS handshake failed", "target", hostPort)
-		return
+
+	result.Latency = time.Since(start)
+	state := tlsConn.ConnectionState()
+
+	if len(state.PeerCertificates) > 0 {
+		result.CertSubject = state.PeerCertificates[0].Subject.CommonName
 	}
-	state := c.ConnectionState()
-	alpn := state.NegotiatedProtocol
-	domain := state.PeerCertificates[0].Subject.CommonName
-	issuers := strings.Join(state.PeerCertificates[0].Issuer.Organization, " | ")
-	log := slog.Info
-	feasible := true
-	geoCode := geo.GetGeo(host.IP)
-	if state.Version != tls.VersionTLS13 || alpn != "h2" || len(domain) == 0 || len(issuers) == 0 {
-		// not feasible
-		log = slog.Debug
-		feasible = false
-	} else {
-		out <- strings.Join([]string{host.IP.String(), host.Origin, domain, "\"" + issuers + "\"", geoCode}, ",") +
-			"\n"
+
+	result.ServerName = serverName
+	result.HasReality = detectReality(state)
+	return result
+}
+
+// ScanBatch scans a slice of targets concurrently and returns results.
+func (s *Scanner) ScanBatch(targets []Target) []ScanResult {
+	sem := make(chan struct{}, s.Concurrent)
+	resultCh := make(chan ScanResult, len(targets))
+
+	for _, t := range targets {
+		sem <- struct{}{}
+		go func(t Target) {
+			defer func() { <-sem }()
+			resultCh <- s.Scan(t.IP, t.Port, t.ServerName)
+		}(t)
 	}
-	log("Connected to target", "feasible", feasible, "ip", host.IP.String(),
-		"origin", host.Origin,
-		"tls", tls.VersionName(state.Version), "alpn", alpn, "cert-domain", domain, "cert-issuer", issuers,
-		"geo", geoCode)
+
+	// Drain semaphore to wait for all goroutines.
+	for i := 0; i < cap(sem); i++ {
+		sem <- struct{}{}
+	}
+	close(resultCh)
+
+	results := make([]ScanResult, 0, len(targets))
+	for r := range resultCh {
+		results = append(results, r)
+	}
+	return results
+}
+
+// Target represents a host/port/SNI combination to scan.
+type Target struct {
+	IP         string
+	Port       string
+	ServerName string
+}
+
+// detectReality checks TLS state heuristics that suggest a REALITY endpoint.
+func detectReality(state tls.ConnectionState) bool {
+	// REALITY endpoints typically present TLS 1.3 with no valid CA chain.
+	if state.Version != tls.VersionTLS13 {
+		return false
+	}
+	if len(state.VerifiedChains) == 0 && len(state.PeerCertificates) > 0 {
+		return true
+	}
+	return false
+}
+
+// isRealityFingerprint inspects a handshake error for patterns typical of
+// REALITY's synthetic certificate rejection.
+func isRealityFingerprint(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Heuristic: alert "unknown_ca" or "certificate_unknown" from a TLS 1.3
+	// server can indicate a REALITY node responding with a forged cert.
+	msg := err.Error()
+	return contains(msg, "unknown certificate") ||
+		contains(msg, "certificate signed by unknown authority")
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr ||
+		len(s) > 0 && len(substr) > 0 &&
+			(func() bool {
+				for i := 0; i <= len(s)-len(substr); i++ {
+					if s[i:i+len(substr)] == substr {
+						return true
+					}
+				}
+				return false
+			})())
 }
