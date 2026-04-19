@@ -112,6 +112,7 @@ type Target struct {
 }
 
 // detectReality checks TLS state heuristics that suggest a REALITY endpoint.
+// Note: self-signed certs on TLS 1.3 are the main signal here; not foolproof.
 func detectReality(state tls.ConnectionState) bool {
 	// REALITY endpoints typically present TLS 1.3 with no valid CA chain.
 	if state.Version != tls.VersionTLS13 {
@@ -123,28 +124,4 @@ func detectReality(state tls.ConnectionState) bool {
 	return false
 }
 
-// isRealityFingerprint inspects a handshake error for patterns typical of
-// REALITY's synthetic certificate rejection.
-func isRealityFingerprint(err error) bool {
-	if err == nil {
-		return false
-	}
-	// Heuristic: alert "unknown_ca" or "certificate_unknown" from a TLS 1.3
-	// server can indicate a REALITY node responding with a forged cert.
-	msg := err.Error()
-	return contains(msg, "unknown certificate") ||
-		contains(msg, "certificate signed by unknown authority")
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr ||
-		len(s) > 0 && len(substr) > 0 &&
-			(func() bool {
-				for i := 0; i <= len(s)-len(substr); i++ {
-					if s[i:i+len(substr)] == substr {
-						return true
-					}
-				}
-				return false
-			})())
-}
+// isRea
