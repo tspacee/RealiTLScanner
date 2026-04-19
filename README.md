@@ -40,6 +40,7 @@ It is recommended to run this tool locally, as running the scanner in the cloud 
 
 # Set a timeout for each scan, default: 10 (seconds)
 # Tip: 3-5 seconds is usually sufficient for well-connected hosts
+# Personal note: I find -timeout 4 to be a good balance between speed and accuracy
 ./RealiTLScanner -addr 107.172.1.1/16 -timeout 5
 ```
 ### In docker way
@@ -61,9 +62,8 @@ To enable Geo IP information, place a MaxMind GeoLite2/GeoIP2 Country Database i
 ## Demo
 
 20:51:10.017+103.9 tls=1.3 alpn=h2 domain=rocky-linux.tk issuer="Let's Encrypt"
-2024/02/08 20:51:10 INFO Connected to target feasible=true host=107.172.103.11 tls=1.3 alpn=h2 domain=rn.allinai.dev issuer="Let's Encrypt"
-2024/02/08 20:51:13 INFO Connected to target feasible=true host=107.172.103.16 tls=1.3 alpn=h2 domain=san.hiddify01.foshou.vip issuer="Let's Encrypt"
-2024/02/08 20:51:13 INFO Connected to target feasible=true host=107.172.103.19 tls=1.3 alpn=h2 domain=mgzx19.cnscholar.top issuer="Let's Encrypt"
+2024/02/08 20:51:10 INFO Connected to target feasible=true host=107.172.103.11 tls=1.3 alpn=hn.allinai.dev issuer="Let's Encrypt"
+2024/02/08 20:51:13 INFO Connected to target feasible=true host=107.172.103.16 tls=1.3 alpn=h2 domain=san.hiddify01.foshou.vip issuer="Let's02/08 20:51:13 INFO Connected to target feasible=true host=107.172.103.19 tls=1.3 alpn=h2 domain=mgzx19.cnscholar.top issuer="Let's Encrypt"
 2024/02/08 20:51:13 INFO Connected to target feasible=true host=107.172.103.22 tls=1.3 alpn=h2 domain=hy2.znull.top issuer=ZeroSSL
 2024/02/08 20:51:21 INFO Connected to target feasible=true host=107.172.103.37 tls=1.3 alpn=h2 domain=c1.webgenbd.com issuer="Let's Encrypt"
 2024/02/08 20:51:23 INFO Connected to target feasible=true host=107.172.103.46 tls=1.3 alpn=h2 domain=racknerd.myideal.xyz issuer="Let's Encrypt"
