@@ -1,7 +1,8 @@
 FROM golang:1.22-alpine AS build
 WORKDIR /src
 COPY . .
-RUN go build -o RealiTLScanner .
+# Build with optimizations: disable debug info and symbol table
+RUN go build -ldflags="-s -w" -o RealiTLScanner .
 
 FROM alpine:latest
 RUN apk add --no-cache ca-certificates
