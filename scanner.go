@@ -25,6 +25,8 @@ type Scanner struct {
 }
 
 // NewScanner creates a Scanner with the given timeout and concurrency.
+// Personal note: increased default-friendly timeout to 10s since many hosts
+// I scan are geographically distant and 5s caused too many false negatives.
 func NewScanner(timeout time.Duration, concurrent int) *Scanner {
 	return &Scanner{
 		Timeout:    timeout,
@@ -118,10 +120,8 @@ func detectReality(state tls.ConnectionState) bool {
 	if state.Version != tls.VersionTLS13 {
 		return false
 	}
-	if len(state.VerifiedChains) == 0 && len(state.PeerCertificates) > 0 {
+	if len(state.VerifiedChains) == 0 {
 		return true
 	}
 	return false
 }
-
-// isRea
