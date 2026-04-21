@@ -16,8 +16,8 @@ func NewGeo() *Geo {
 	geo := &Geo{
 		mu: sync.Mutex{},
 	}
-	// Try GeoLite2-Country.mmdb as a fallback in addition to Country.mmdb
-	for _, dbPath := range []string{"Country.mmdb", "GeoLite2-Country.mmdb"} {
+	// Try multiple common DB filenames, including MaxMind and db-ip variants
+	for _, dbPath := range []string{"Country.mmdb", "GeoLite2-Country.mmdb", "dbip-country-lite.mmdb"} {
 		reader, err := geoip2.Open(dbPath)
 		if err != nil {
 			continue
@@ -26,7 +26,7 @@ func NewGeo() *Geo {
 		geo.geoReader = reader
 		return geo
 	}
-	slog.Warn("Cannot open Country.mmdb or GeoLite2-Country.mmdb, GeoIP lookup will be disabled")
+	slog.Warn("Cannot open Country.mmdb, GeoLite2-Country.mmdb, or dbip-country-lite.mmdb, GeoIP lookup will be disabled")
 	return geo
 }
 
